@@ -1,0 +1,21 @@
+{
+  "matches": [
+    {
+      "vulnerability": {
+        "id": "CVE-2021-44228",
+        "severity": "Critical",
+        "urls": ["https://nvd.nist.gov/vuln/detail/CVE-2021-44228"]
+      },
+      "artifact": {
+        "name": "log4j-js",
+        "version": "2.0.0",
+        "type": "npm",
+        "locations": [
+          {
+            "path": "app/package-lock.json"
+          }
+        ]
+      }
+    }
+  ]
+}

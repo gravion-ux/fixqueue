@@ -1,0 +1,31 @@
+{
+  "generatedAt": "2026-11-05T09:00:00.000Z",
+  "epssDate": "2026-11-04",
+  "kevVersion": "2026.11.04",
+  "epss": {
+    "CVE-2021-44228": {
+      "score": 0.97963,
+      "percentile": 0.99874,
+      "date": "2026-11-04"
+    },
+    "CVE-2020-11111": {
+      "score": 0.24117,
+      "percentile": 0.61204,
+      "date": "2026-11-04"
+    }
+  },
+  "kev": {
+    "CVE-2021-44228": {
+      "dueDate": "2021-12-24",
+      "ransomware": true,
+      "vendor": "Apache",
+      "name": "Apache Log4j2 JNDI features do not protect against attacker controlled LDAP endpoints"
+    },
+    "CVE-2020-11111": {
+      "dueDate": null,
+      "ransomware": false,
+      "vendor": null,
+      "name": null
+    }
+  }
+}

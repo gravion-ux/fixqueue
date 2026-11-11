@@ -1,0 +1,4 @@
+node_modules/
+.fixqueue/
+*.log
+.DS_Store
