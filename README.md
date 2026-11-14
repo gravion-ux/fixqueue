@@ -170,6 +170,13 @@ sensitive details about your code and dependencies — review before sharing.
 
 Priyanshu Kumar Thakur (Gravion)
 
+## Sponsors
+
+Sponsorship pays for the maintenance, triage and release time behind this tool. Sponsors are
+listed here by name, and name placement starts at the $25 a month tier.
+
+- [Sponsor on GitHub](https://github.com/sponsors/gravion-ux)
+
 ## License
 
 [MIT](LICENSE)
