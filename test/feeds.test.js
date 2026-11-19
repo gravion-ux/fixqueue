@@ -184,3 +184,50 @@ test('loadEnrichment fetches EPSS data for CVEs missing from the cache', async (
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('fetchEpss splits a large CVE list into bounded requests', async () => {
+  const cves = Array.from({ length: 250 }, (_, index) => `CVE-2026-${String(index).padStart(4, '0')}`);
+  const fetchImpl = recordingFetch({ 'api.first.org': { data: [] } });
+  await fetchEpss(cves, { fetchImpl });
+  assert.ok(fetchImpl.calls.length > 1, 'expected the request to be split');
+  for (const call of fetchImpl.calls) {
+    assert.ok(call.length < 2_000, `request URL is ${call.length} characters`);
+  }
+});
+
+test('fetchEpss deduplicates the requested CVE list', async () => {
+  const fetchImpl = recordingFetch({ 'api.first.org': EPSS_DOCUMENT });
+  await fetchEpss(['CVE-2021-44228', 'CVE-2021-44228'], { fetchImpl });
+  assert.equal(fetchImpl.calls.length, 1);
+  assert.ok(fetchImpl.calls[0].endsWith('?cve=CVE-2021-44228'));
+});
+
+test('loadEnrichment normalizes CVE case so a lowercase request hits the cache', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'fixqueue-feeds-'));
+  try {
+    await writeCache(root, 'kev', { catalogVersion: '2026.11.04', cves: {} }, NOW);
+    await writeCache(root, 'epss', { cves: { 'CVE-2021-44228': { score: 0.9, percentile: 0.9, date: '2026-11-04' } } }, NOW);
+    const fetchImpl = recordingFetch({});
+    const result = await loadEnrichment(root, { cves: ['cve-2021-44228'], now: NOW, fetchImpl });
+    assert.equal(result.fromCache, true);
+    assert.equal(fetchImpl.calls.length, 0);
+    assert.ok(result.epss['CVE-2021-44228']);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('loadEnrichment caches fetched EPSS records under a normalized key', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'fixqueue-feeds-'));
+  try {
+    await writeCache(root, 'kev', { catalogVersion: '2026.11.04', cves: {} }, NOW);
+    const fetchImpl = recordingFetch({ 'api.first.org': EPSS_DOCUMENT });
+    await loadEnrichment(root, { cves: ['cve-2021-44228'], now: NOW, fetchImpl });
+    const second = await loadEnrichment(root, { cves: ['cve-2021-44228'], now: NOW, fetchImpl });
+    assert.equal(second.fromCache, true);
+    assert.equal(fetchImpl.calls.filter((call) => call.includes('api.first.org')).length, 1);
+    assert.ok(second.epss['CVE-2021-44228']);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

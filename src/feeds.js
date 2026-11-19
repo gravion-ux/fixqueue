@@ -77,10 +77,37 @@ function resolveFetch(opts = {}) {
 }
 
 /**
+ * Maximum number of CVEs sent in a single EPSS request.
+ *
+ * The EPSS API takes the identifiers as a comma-separated query parameter, so an
+ * unbounded list would produce an over-long URL that the server rejects.
+ * @type {number}
+ */
+export const EPSS_BATCH_SIZE = 100;
+
+/**
+ * Normalise a list of CVE identifiers into an uppercase, duplicate-free list.
+ * @param {string[]} cves - Raw CVE identifiers.
+ * @returns {string[]} The normalised identifiers in first-seen order.
+ */
+function normalizeCves(cves) {
+  const seen = new Set();
+  const result = [];
+  for (const cve of Array.isArray(cves) ? cves : []) {
+    if (typeof cve !== 'string' || !cve) continue;
+    const normalized = cve.toUpperCase();
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push(normalized);
+  }
+  return result;
+}
+
+/**
  * Fetch and parse the CISA KEV catalogue.
  * @param {{ fetchImpl?: Function }} [opts] - Options carrying an injectable HTTP helper.
  * @returns {Promise<{ catalogVersion: string|null, dateReleased: string|null, cves: object }>}
- *   The catalogue version and a map of CVE records.
+ *   The catalogue version and a map of KEV records keyed by uppercase CVE id.
  */
 export async function fetchKev(opts = {}) {
   const fetchImpl = resolveFetch(opts);
@@ -89,7 +116,7 @@ export async function fetchKev(opts = {}) {
   const cves = {};
   for (const vulnerability of Array.isArray(doc?.vulnerabilities) ? doc.vulnerabilities : []) {
     if (!vulnerability || typeof vulnerability.cveID !== 'string') continue;
-    cves[vulnerability.cveID] = {
+    cves[vulnerability.cveID.toUpperCase()] = {
       dueDate: vulnerability.dueDate ?? null,
       ransomware: vulnerability.knownRansomwareCampaignUse === 'Known',
       vendor: vulnerability.vendorProject ?? null,
@@ -106,29 +133,34 @@ export async function fetchKev(opts = {}) {
 /**
  * Fetch EPSS probability data for a list of CVE identifiers.
  *
- * The EPSS API accepts several CVEs in one comma-joined request.
+ * The EPSS API accepts several CVEs in one comma-joined request. Long lists are
+ * split into bounded batches so the query string never grows past what a server
+ * will accept. Identifiers are matched without regard to letter case.
  * @param {string[]} cves - CVE identifiers to look up.
  * @param {{ fetchImpl?: Function }} [opts] - Options carrying an injectable HTTP helper.
  * @returns {Promise<Record<string, { score: number, percentile: number, date: string|null }>>}
- *   EPSS records keyed by CVE; an empty map when no CVEs are requested.
+ *   EPSS records keyed by uppercase CVE; an empty map when no CVEs are requested.
  */
 export async function fetchEpss(cves, opts = {}) {
-  const list = Array.isArray(cves) ? cves.filter((cve) => typeof cve === 'string' && cve) : [];
+  const list = normalizeCves(cves);
   if (list.length === 0) return {};
   const fetchImpl = resolveFetch(opts);
-  const url = `${EPSS_URL}?cve=${list.join(',')}`;
-  const response = await fetchImpl(url);
-  const doc = JSON.parse(response.body);
   const records = {};
-  for (const entry of Array.isArray(doc?.data) ? doc.data : []) {
-    if (!entry || typeof entry.cve !== 'string') continue;
-    const score = Number(entry.epss);
-    const percentile = Number(entry.percentile);
-    records[entry.cve] = {
-      score: Number.isFinite(score) ? score : 0,
-      percentile: Number.isFinite(percentile) ? percentile : 0,
-      date: entry.date ?? null,
-    };
+  for (let offset = 0; offset < list.length; offset += EPSS_BATCH_SIZE) {
+    const batch = list.slice(offset, offset + EPSS_BATCH_SIZE);
+    const url = `${EPSS_URL}?cve=${batch.join(',')}`;
+    const response = await fetchImpl(url);
+    const doc = JSON.parse(response.body);
+    for (const entry of Array.isArray(doc?.data) ? doc.data : []) {
+      if (!entry || typeof entry.cve !== 'string') continue;
+      const score = Number(entry.epss);
+      const percentile = Number(entry.percentile);
+      records[entry.cve.toUpperCase()] = {
+        score: Number.isFinite(score) ? score : 0,
+        percentile: Number.isFinite(percentile) ? percentile : 0,
+        date: entry.date ?? null,
+      };
+    }
   }
   return records;
 }
@@ -153,16 +185,23 @@ export async function loadEnrichment(root, opts = {}) {
     fetchImpl,
   } = opts;
   const cacheRoot = resolveCacheRoot(root);
-  const requested = Array.isArray(cves) ? cves.filter((cve) => typeof cve === 'string' && cve) : [];
+  const requested = normalizeCves(cves);
 
   const cachedKev = await readCache(cacheRoot, 'kev', ttlMs, now);
   const cachedEpss = await readCache(cacheRoot, 'epss', ttlMs, now);
+
+  const cachedEpssMap = cachedEpss && typeof cachedEpss.cves === 'object' ? cachedEpss.cves : {};
+  const epssIndex = new Map();
+  for (const [key, value] of Object.entries(cachedEpssMap)) {
+    const normalized = key.toUpperCase();
+    if (!epssIndex.has(normalized)) epssIndex.set(normalized, value);
+  }
+  let epssMap = Object.fromEntries(epssIndex);
 
   if (offline) {
     if (!cachedKev) {
       throw new Error('offline mode requires a populated KEV cache entry; no cache entry was found');
     }
-    const epssMap = cachedEpss && typeof cachedEpss.cves === 'object' ? cachedEpss.cves : {};
     return { epss: epssMap, kev: cachedKev, fromCache: true };
   }
 
@@ -174,8 +213,7 @@ export async function loadEnrichment(root, opts = {}) {
     fetched = true;
   }
 
-  let epssMap = cachedEpss && typeof cachedEpss.cves === 'object' ? cachedEpss.cves : {};
-  const missing = requested.filter((cve) => !epssMap[cve]);
+  const missing = requested.filter((cve) => !epssIndex.has(cve));
   if (refresh || missing.length > 0) {
     const fetchedRecords = await fetchEpss(refresh ? requested : missing, { fetchImpl });
     epssMap = { ...epssMap, ...fetchedRecords };

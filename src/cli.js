@@ -107,6 +107,7 @@ export function parseArgs(argv) {
   const positionals = [];
   const options = {};
   const unknown = [];
+  const unknownValues = [];
 
   let index = 0;
   while (index < args.length) {
@@ -136,6 +137,7 @@ export function parseArgs(argv) {
       } else {
         unknown.push(`--${name}`);
         if (value === undefined && index + 1 < args.length && !args[index + 1].startsWith('--')) {
+          unknownValues.push(args[index + 1]);
           index += 1;
         }
       }
@@ -152,6 +154,7 @@ export function parseArgs(argv) {
   }
 
   options.unknown = unknown;
+  options.unknownValues = unknownValues;
   return { command, options, positionals };
 }
 
@@ -208,13 +211,28 @@ function resolveCache(options, io) {
  */
 async function scanCommand(positionals, options, io) {
   const cwd = io.cwd ?? process.cwd();
-  if (positionals.length === 0) {
+
+  // An unknown flag swallows the token that follows it. When that token turns
+  // out to be a real path it is recovered here, so a typo or a flag from a
+  // newer release never silently drops the directory the user asked to scan.
+  const candidates = [...positionals];
+  for (const swallowed of Array.isArray(options.unknownValues) ? options.unknownValues : []) {
+    if (candidates.includes(swallowed)) continue;
+    try {
+      await stat(resolve(cwd, swallowed));
+      candidates.push(swallowed);
+    } catch {
+      // Not a path on disk, so it stays an unknown flag value.
+    }
+  }
+
+  if (candidates.length === 0) {
     writeTo(io.stderr, 'error: scan requires at least one path\n');
     return 2;
   }
 
   const files = [];
-  for (const candidate of positionals) {
+  for (const candidate of candidates) {
     const absolute = resolve(cwd, candidate);
     let info;
     try {
@@ -338,7 +356,9 @@ async function scanCommand(positionals, options, io) {
 
   if (options['fail-on']) {
     const threshold = SEVERITY_ORDER.indexOf(options['fail-on']);
-    if (threshold >= 0 && limited.some((finding) => SEVERITY_ORDER.indexOf(finding.severity) <= threshold)) {
+    // The gate inspects every ranked finding: limiting the report with --top
+    // must never hide a finding that should fail the build.
+    if (threshold >= 0 && ranked.some((finding) => SEVERITY_ORDER.indexOf(finding.severity) <= threshold)) {
       return 1;
     }
   }

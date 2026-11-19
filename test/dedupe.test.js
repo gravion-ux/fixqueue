@@ -147,3 +147,41 @@ test('dedupe of an empty or invalid input returns an empty array', () => {
   assert.deepEqual(dedupe([]), []);
   assert.deepEqual(dedupe(undefined), []);
 });
+
+test('the merged finding never lists its own id as an alias', () => {
+  const merged = dedupe([
+    finding({ id: 'RULE-1', aliases: ['CVE-2021-44228'] }),
+    finding({ id: 'CVE-2021-44228', aliases: [] }),
+  ]);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].id, 'CVE-2021-44228');
+  assert.ok(!merged[0].aliases.includes(merged[0].id));
+});
+
+test('a member advisory id survives the merge as an alias', () => {
+  const merged = dedupe([
+    finding({ id: 'CVE-2021-44228', aliases: [] }),
+    finding({ id: 'GHSA-aaaa-bbbb-cccc', aliases: ['CVE-2021-44228'] }),
+  ]);
+  assert.equal(merged.length, 1);
+  assert.ok(merged[0].aliases.includes('GHSA-aaaa-bbbb-cccc'));
+});
+
+test('every advisory identifier in a transitive chain survives the merge', () => {
+  const merged = dedupe([
+    finding({ id: 'CVE-2021-44228', aliases: [] }),
+    finding({ id: 'GHSA-aaaa-bbbb-cccc', aliases: ['CVE-2021-44228'] }),
+    finding({ id: 'OSV-2021-44228', aliases: ['GHSA-aaaa-bbbb-cccc'] }),
+  ]);
+  assert.equal(merged.length, 1);
+  assert.deepEqual(merged[0].aliases, ['GHSA-aaaa-bbbb-cccc', 'OSV-2021-44228']);
+});
+
+test('alias exclusion ignores letter case', () => {
+  const merged = dedupe([
+    finding({ id: 'RULE-1', aliases: ['cve-2021-44228'] }),
+    finding({ id: 'CVE-2021-44228', aliases: [] }),
+  ]);
+  assert.equal(merged.length, 1);
+  assert.ok(!merged[0].aliases.some((alias) => alias.toUpperCase() === 'CVE-2021-44228'));
+});

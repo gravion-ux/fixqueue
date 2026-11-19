@@ -95,3 +95,38 @@ test('enrich tolerates missing maps', () => {
   assert.equal(result.length, 1);
   assert.equal(result[0].kev.listed, false);
 });
+
+test('mergeEpss matches a CVE regardless of letter case', () => {
+  const result = mergeEpss(finding({ id: 'cve-2021-44228' }), EPSS_MAP);
+  assert.equal(result.epss.percentile, 0.9946);
+});
+
+test('mergeKev matches a CVE regardless of letter case', () => {
+  const result = mergeKev(finding({ id: 'cve-2021-44228' }), KEV_MAP);
+  assert.equal(result.kev.listed, true);
+});
+
+test('mergeEpss matches a lowercase map key against an uppercase finding id', () => {
+  const result = mergeEpss(finding(), { 'cve-2021-44228': EPSS_MAP['CVE-2021-44228'] });
+  assert.equal(result.epss.percentile, 0.9946);
+});
+
+test('mergeKev matches a lowercase map key against an uppercase finding id', () => {
+  const result = mergeKev(finding(), { 'cve-2021-44228': KEV_MAP['CVE-2021-44228'] });
+  assert.equal(result.kev.listed, true);
+});
+
+test('enrich matches a lowercase finding id against an uppercase map', () => {
+  const result = enrich([finding({ id: 'cve-2021-44228' })], { epss: EPSS_MAP, kev: KEV_MAP });
+  assert.equal(result[0].epss.percentile, 0.9946);
+  assert.equal(result[0].kev.listed, true);
+});
+
+test('enrich matches an uppercase finding id against a lowercase map', () => {
+  const result = enrich([finding()], {
+    epss: { 'cve-2021-44228': EPSS_MAP['CVE-2021-44228'] },
+    kev: { 'cve-2021-44228': KEV_MAP['CVE-2021-44228'] },
+  });
+  assert.equal(result[0].epss.percentile, 0.9946);
+  assert.equal(result[0].kev.listed, true);
+});

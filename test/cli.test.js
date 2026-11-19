@@ -463,3 +463,84 @@ test('main with the cache subcommand reports the cache status', async () => {
     await rm(cwd, { recursive: true, force: true });
   }
 });
+
+test('the --fail-on gate considers every finding, not only the --top subset', async () => {
+  const { cwd, cacheDir } = await sandbox();
+  try {
+    await writeFile(
+      join(cwd, 'mixed.json'),
+      JSON.stringify({
+        runs: [
+          {
+            results: [
+              {
+                ruleId: 'R-1',
+                level: 'error',
+                message: { text: 'high with intelligence' },
+                properties: { tags: ['CVE-2021-44228'], 'security-severity': '7.5' },
+              },
+              {
+                ruleId: 'R-2',
+                level: 'error',
+                message: { text: 'critical without intelligence' },
+                properties: { tags: ['CVE-2026-99999'], 'security-severity': '9.9' },
+              },
+            ],
+          },
+        ],
+      }),
+      'utf8',
+    );
+    const stdout = sink();
+    const code = await main(['scan', cwd, '--format', 'json', '--top', '1', '--fail-on', 'critical'], {
+      stdout,
+      stderr: sink(),
+      fetchImpl: fakeFetch(),
+      cwd,
+      now: NOW,
+      cacheDir,
+    });
+    assert.equal(code, 1, 'a critical finding below the --top cut must still fail the gate');
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test('a scan path is not swallowed by an unknown flag', async () => {
+  const { cwd, cacheDir } = await sandbox();
+  try {
+    await writeFile(
+      join(cwd, 'scan.json'),
+      JSON.stringify({
+        runs: [
+          {
+            results: [
+              {
+                ruleId: 'CVE-2021-44228',
+                level: 'error',
+                message: { text: 'Log4Shell' },
+                properties: { 'security-severity': '9.8' },
+              },
+            ],
+          },
+        ],
+      }),
+      'utf8',
+    );
+    const stdout = sink();
+    const stderr = sink();
+    const code = await main(['scan', '--verbose', cwd, '--format', 'json'], {
+      stdout,
+      stderr,
+      fetchImpl: fakeFetch(),
+      cwd,
+      now: NOW,
+      cacheDir,
+    });
+    assert.equal(code, 0, stderr.text);
+    const parsed = JSON.parse(stdout.text);
+    assert.equal(parsed.findings.length, 1);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});

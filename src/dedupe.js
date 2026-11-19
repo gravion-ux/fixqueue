@@ -71,16 +71,32 @@ function identityTokens(finding) {
 }
 
 /**
+ * Build the key used to compare two identifiers for equality.
+ *
+ * Advisory identifiers are compared without regard to letter case; every other
+ * value is compared exactly, because package names can be case sensitive.
+ * @param {unknown} value - Identifier to normalise.
+ * @returns {string} The comparison key.
+ */
+function identityKey(value) {
+  if (typeof value !== 'string') return '';
+  return isAdvisoryId(value) ? value.toUpperCase() : `raw:${value}`;
+}
+
+/**
  * Merge a group of duplicate findings into a single canonical finding.
  *
  * The first-seen finding supplies the title; severity is the maximum across the
- * group so the most pessimistic report survives the merge.
+ * group so the most pessimistic report survives the merge. Every advisory
+ * identifier in the group is preserved: the canonical id is chosen first, and
+ * the remaining identifiers — including member ids that carried the alias —
+ * are kept as aliases.
  * @param {object[]} group - Findings known to describe the same issue.
  * @returns {object} The merged canonical finding.
  */
 function mergeGroup(group) {
   const first = group[0];
-  const aliases = new Set();
+  const aliasCandidates = new Map();
   const locations = new Set();
   const references = new Set();
   const tools = new Set();
@@ -91,13 +107,25 @@ function mergeGroup(group) {
   let idIsAdvisory = isAdvisoryId(first.id);
   let occurrences = 0;
 
+  /**
+   * Record a candidate alias, keeping the first spelling seen for a key.
+   * @param {unknown} value - Candidate alias.
+   * @returns {void}
+   */
+  const rememberAlias = (value) => {
+    if (typeof value !== 'string' || !value) return;
+    const key = identityKey(value);
+    if (!aliasCandidates.has(key)) aliasCandidates.set(key, value);
+  };
+
   for (const finding of group) {
     if (!idIsAdvisory && isAdvisoryId(finding.id)) {
       id = finding.id;
       idIsAdvisory = true;
     }
+    if (isAdvisoryId(finding.id)) rememberAlias(finding.id);
     for (const alias of Array.isArray(finding.aliases) ? finding.aliases : []) {
-      if (typeof alias === 'string' && alias !== id) aliases.add(alias);
+      rememberAlias(alias);
     }
     for (const location of Array.isArray(finding.locations) ? finding.locations : []) {
       if (typeof location === 'string') locations.add(location);
@@ -117,9 +145,15 @@ function mergeGroup(group) {
     occurrences += Number.isFinite(finding.occurrences) ? finding.occurrences : 1;
   }
 
+  const idKey = identityKey(id);
+  const aliases = [...aliasCandidates.entries()]
+    .filter(([key]) => key !== idKey)
+    .map(([, value]) => value)
+    .sort();
+
   return {
     id,
-    aliases: [...aliases].sort(),
+    aliases,
     title: typeof first.title === 'string' ? first.title : '',
     severity,
     package: packageField,
