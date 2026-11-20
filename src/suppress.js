@@ -90,7 +90,7 @@ export function isExpiredRule(rule, now = Date.now()) {
  * @param {string} matcher - The rule matcher.
  * @returns {boolean} True when the rule applies to the finding.
  */
-function matches(finding, matcher) {
+export function matchesSuppression(finding, matcher) {
   const source = finding && typeof finding === 'object' ? finding : {};
   if (ADVISORY_PREFIX.test(matcher)) {
     const candidates = [source.id, ...(Array.isArray(source.aliases) ? source.aliases : [])];
@@ -120,7 +120,105 @@ function matches(finding, matcher) {
 }
 
 /**
+ * Build the lookup tables that make suppression matching cheap.
+ *
+ * Every rule is examined once: a rule that has expired is dropped, and every
+ * remaining rule is filed under the key it can match. A finding is then
+ * matched with a handful of lookups instead of a walk over every rule, which
+ * matters because a scan tests every finding against the whole ignore file.
+ *
+ * The position of each rule in the file is kept, so the rule that matches
+ * first is still the one that wins when a finding matches several rules.
+ * @param {Array<{ matcher: string, reason: string|null, expires: string|null }>} rules - Parsed rules.
+ * @param {number|Date} [now] - Current time, used to evaluate expiry.
+ * @returns {{ advisory: Map<string, object>, ecosystems: Map<string, object>, packages: Map<string, object> }}
+ *   The lookup tables, each mapping a key to the rule that owns it and its position.
+ */
+export function buildSuppressionIndex(rules, now = Date.now()) {
+  const advisory = new Map();
+  const ecosystems = new Map();
+  const packages = new Map();
+  if (!Array.isArray(rules)) return { advisory, ecosystems, packages };
+  const current = now instanceof Date ? now.getTime() : Number(now);
+
+  rules.forEach((rule, order) => {
+    if (!rule || typeof rule.matcher !== 'string') return;
+    if (isExpiredRule(rule, current)) return;
+    const matcher = rule.matcher;
+
+    if (ADVISORY_PREFIX.test(matcher)) {
+      const key = matcher.toUpperCase();
+      if (!advisory.has(key)) advisory.set(key, { rule, order });
+      return;
+    }
+    if (matcher.includes(':')) {
+      const separator = matcher.indexOf(':');
+      const ecosystem = matcher.slice(0, separator).trim().toLowerCase();
+      const coordinates = matcher.slice(separator + 1).trim();
+      const key = `${ecosystem}|${coordinates}`;
+      if (!ecosystems.has(key)) ecosystems.set(key, { rule, order });
+      return;
+    }
+    if (matcher.includes('@') && !packages.has(matcher)) {
+      packages.set(matcher, { rule, order });
+    }
+  });
+
+  return { advisory, ecosystems, packages };
+}
+
+/**
+ * Find the suppression rule that applies to a finding, using a prebuilt index.
+ *
+ * The rule that matches first in the ignore file wins, exactly as it does when
+ * the rules are walked one by one.
+ * @param {object} finding - Canonical finding.
+ * @param {{ advisory: Map<string, object>, ecosystems: Map<string, object>, packages: Map<string, object> }} index
+ *   The tables built by {@link buildSuppressionIndex}.
+ * @returns {{ matcher: string, reason: string|null, expires: string|null }|null}
+ *   The first matching rule, or null.
+ */
+export function findSuppression(finding, index) {
+  const source = finding && typeof finding === 'object' ? finding : {};
+  if (!index || typeof index !== 'object') return null;
+  let best = null;
+
+  /**
+   * Keep the rule that comes first in the ignore file.
+   * @param {object|undefined} entry - The indexed rule and its position.
+   * @returns {void}
+   */
+  const consider = (entry) => {
+    if (!entry) return;
+    if (best === null || entry.order < best.order) best = entry;
+  };
+
+  if (typeof source.id === 'string') {
+    consider(index.advisory.get(source.id.toUpperCase()));
+  }
+  if (Array.isArray(source.aliases)) {
+    for (const alias of source.aliases) {
+      if (typeof alias === 'string') consider(index.advisory.get(alias.toUpperCase()));
+    }
+  }
+
+  const pkg = source.package;
+  if (pkg && typeof pkg.name === 'string') {
+    const coordinates = `${pkg.name}@${pkg.version ?? ''}`;
+    consider(index.packages.get(coordinates));
+    const ecosystem = String(pkg.ecosystem ?? '').toLowerCase();
+    consider(index.ecosystems.get(`${ecosystem}|${coordinates}`));
+  }
+
+  return best ? best.rule : null;
+}
+
+/**
  * Find the suppression rule that applies to a finding.
+ *
+ * This is the convenience form for a single finding. When many findings are
+ * tested against the same rules, build the index once with
+ * {@link buildSuppressionIndex} and use {@link findSuppression} instead.
  * @param {object} finding - Canonical finding.
  * @param {Array<{ matcher: string, reason: string|null, expires: string|null }>} rules - Parsed rules.
  * @param {number|Date} [now] - Current time, used to evaluate expiry.
@@ -129,12 +227,7 @@ function matches(finding, matcher) {
  */
 export function isSuppressed(finding, rules, now = Date.now()) {
   if (!Array.isArray(rules)) return null;
-  for (const rule of rules) {
-    if (!rule || typeof rule.matcher !== 'string') continue;
-    if (isExpiredRule(rule, now)) continue;
-    if (matches(finding, rule.matcher)) return rule;
-  }
-  return null;
+  return findSuppression(finding, buildSuppressionIndex(rules, now));
 }
 
 /**

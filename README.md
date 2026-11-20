@@ -148,6 +148,21 @@ const queue = rank(enrich(dedupe(findings), { epss, kev }));
 console.log(toMarkdown(queue, { generatedAt: new Date().toISOString() }));
 ```
 
+## Performance
+
+Merging scanner output is the path every run takes, so it is the path that gets measured.
+`bench/benchmark.mjs` times the whole scan pipeline against a built-in corpus: four scanner
+documents, 2500 deduplicated findings, 400 ignore rules and 20,000 intelligence feed records.
+
+```bash
+node bench/benchmark.mjs
+```
+
+Each workload is timed seven times and the fastest run is reported, because the slowest run is
+usually the one that caught a stray background process rather than the one that measured the code.
+Compare two revisions on the same machine and the same Node build; the absolute numbers are not
+comparable between machines.
+
 ## Development
 
 ```bash

@@ -5,6 +5,27 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Suppression matching no longer walks the whole ignore file for every finding. The rules are
+  indexed once — expired rules are dropped and each remaining rule is filed under the key it can
+  match — and a finding is then matched with a handful of lookups. The rule that matches first in
+  the ignore file still wins.
+  Measured against the previous revision on the same machine, with 2500 deduplicated findings and
+  400 ignore rules, matching every finding is 203 times faster and the whole scan pipeline is
+  10.9 times faster.
+
+### Added
+
+- `buildSuppressionIndex` and `findSuppression`, which let a caller match many findings against
+  one set of rules without rebuilding the index for each finding. `isSuppressed` keeps its
+  original signature and behaviour for a single finding.
+- `matchesSuppression`, which reports whether one matcher applies to one finding.
+- `bench/benchmark.mjs`, which times the scan pipeline against a built-in corpus, so the numbers
+  above can be reproduced with `node bench/benchmark.mjs`.
+
 ## [0.1.0] - 2026-11-05
 
 ### Added

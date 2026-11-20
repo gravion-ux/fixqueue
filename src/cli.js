@@ -15,7 +15,13 @@ import { loadEnrichment } from './feeds.js';
 import { normalizeAny, normalizeGrype, normalizeOsv, normalizeSarif, normalizeTrivy } from './normalize.js';
 import { toJson, toMarkdown, toSarif } from './report.js';
 import { rank } from './score.js';
-import { formatSuppression, isExpiredRule, isSuppressed, parseSuppressions } from './suppress.js';
+import {
+  buildSuppressionIndex,
+  findSuppression,
+  formatSuppression,
+  isExpiredRule,
+  parseSuppressions,
+} from './suppress.js';
 
 /**
  * Format adapters keyed by their canonical format name.
@@ -302,8 +308,9 @@ async function scanCommand(positionals, options, io) {
 
   const kept = [];
   const suppressed = [];
+  const suppressionIndex = buildSuppressionIndex(rules, now);
   for (const finding of findings) {
-    const rule = isSuppressed(finding, rules, now);
+    const rule = findSuppression(finding, suppressionIndex);
     if (rule) {
       suppressed.push({
         id: finding.id,

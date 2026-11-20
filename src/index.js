@@ -7,6 +7,14 @@ export { findingKey, dedupe } from './dedupe.js';
 export { enrich, mergeEpss, mergeKev } from './enrich.js';
 export { scoreFinding, rank, severityWeight } from './score.js';
 export { toMarkdown, toJson, toSarif } from './report.js';
-export { parseSuppressions, isSuppressed, formatSuppression } from './suppress.js';
+export {
+  buildSuppressionIndex,
+  findSuppression,
+  formatSuppression,
+  isExpiredRule,
+  isSuppressed,
+  matchesSuppression,
+  parseSuppressions,
+} from './suppress.js';
 export { readCache, writeCache, cacheStatus } from './cache.js';
 export { fetchKev, fetchEpss, loadEnrichment } from './feeds.js';
