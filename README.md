@@ -1,5 +1,9 @@
 # fixqueue
 
+![Demo](docs/demo.png)
+
+*Merging scanner outputs into one prioritised fix queue.*
+
 Merge multiple security scanner outputs into one deduplicated, EPSS/KEV-enriched, prioritized fix queue.
 
 [![CI](https://github.com/gravion-ux/fixqueue/actions/workflows/ci.yml/badge.svg)](https://github.com/gravion-ux/fixqueue/actions/workflows/ci.yml)
